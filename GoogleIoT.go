@@ -169,11 +169,20 @@ func main() {
 		}
 		co2Value := k30.K30ReadValue()
 		if co2Value > 0 {
-			if mString == "" {
-				mString = fmt.Sprintf("%s,sensor=k30_co2 ppm=%d %d", *measurement, co2Value, time.Now().UnixNano()) //)
+			if *format == "json" {
+				if mString == "" {
+					mString = fmt.Sprintf("{\"measurement\": \"%s\", \"tags\": {\"sensor\": \"k_30\"}, \"fields\": {\"ppm\": %d}, \"time\": %d}", *measurement, co2Value, time.Now().UnixNano())
+				} else {
+					mString = fmt.Sprintf("%s\n{\"measurement\": \"%s\", \"tags\": {\"sensor\": \"k_30\"}, \"fields\": {\"ppm\": %d}, \"time\": %d}", mString, *measurement, co2Value, time.Now().UnixNano())
+				}
 			} else {
-				mString = fmt.Sprintf("%s\n%s,sensor=k30_co2 ppm=%d %d", mString, *measurement, co2Value, time.Now().UnixNano())
+				if mString == "" {
+					mString = fmt.Sprintf("%s,sensor=k_30 ppm=%.2f %d", *measurement, co2Value, time.Now().UnixNano())
+				} else {
+					mString = fmt.Sprintf("%s\n%s,sensor=k_30 ppm=%.2f %d", mString, *measurement, co2Value, time.Now().UnixNano())
+				}
 			}
+
 			log.Printf("[main] CO2: %d ", co2Value)
 		} else {
 			log.Println("[main] CO2 Reading Error")
