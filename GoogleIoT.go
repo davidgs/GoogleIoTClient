@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"time"
 
 	"github.com/davidgs/SenseAir_K30_go"
@@ -31,6 +32,7 @@ var (
 	privateKey  = flag.String("private_key", "", "Path to private key file")
 	measurement = flag.String("influx_db", "googleCoreIOT", "InfluxDB Measurement to store into")
 	format      = flag.String("format", "line", "Data format: line or json")
+	virtual     = flag.Bool("virtual", false, "Virtual data or real data from sensors")
 )
 
 func main() {
@@ -124,51 +126,86 @@ func main() {
 
 	log.Println("[main] Creating Subscription")
 	client.Subscribe(topic.config, 0, nil)
-	dev := "/dev/i2c-1"
+	var dev string
 	bme := bme280_go.BME280{}
-	r := bme.BME280Init(dev)
-	if r < 0 {
-		log.Println("[main] BME Init Error")
-	}
-	defer bme.Dev.Close()
 	k30 := SenseAir_K30_go.K30{}
-	r = k30.K30Init(dev)
-	if r < 0 {
-		log.Println("[main] K30 Init Error")
+	if !*virtual {
+		dev = "/dev/i2c-1"
+
+		r := bme.BME280Init(dev)
+		if r < 0 {
+			log.Println("[main] BME Init Error")
+		}
+		defer bme.Dev.Close()
+
+		r = k30.K30Init(dev)
+		if r < 0 {
+			log.Println("[main] K30 Init Error")
+		}
+		defer k30.Dev.Close()
+		log.Println("[main] Publishing Messages")
+		defer client.Disconnect(250)
 	}
-	defer k30.Dev.Close()
-	log.Println("[main] Publishing Messages")
-	defer client.Disconnect(250)
+	virt := *virtual
+	fmt.Println(virt)
 	for 1 > 0 {
 		mString := ""
 		count := 0
+		var temp float64
+		var hum float64
+		var co2Value int
 		for count < 4 {
-			rets := bme.BME280ReadValues()
-			t := float64(float64(rets.Temperature) / 100.00)
-			h := float64(rets.Humidity) / 1024.00
-			if rets.Humidity != -1 && rets.Temperature > -100 {
+			if virt { // invent temp/humidity values
+				s1 := rand.NewSource(time.Now().UnixNano())
+				r1 := rand.New(s1)
+				temp = float64(r1.Intn(100)) + r1.Float64()
+				hum = float64(r1.Intn(100)) + r1.Float64()
 				if *format == "json" {
 					if mString == "" {
-						mString = fmt.Sprintf("{\"measurement\": \"%s\", \"tags\": {\"sensor\": \"bme_280\"}, \"fields\": {\"temp_c\": %.2f, \"humidity\": %.2f}, \"time\": %d}", *measurement, t, h, time.Now().UnixNano())
+						mString = fmt.Sprintf("{\"measurement\": \"%s\", \"tags\": {\"sensor\": \"bme_280\"}, \"fields\": {\"temp_c\": %.2f, \"humidity\": %.2f}, \"time\": %d}", *measurement, temp, hum, time.Now().UnixNano())
 					} else {
-						mString = fmt.Sprintf("%s\n{\"measurement\": \"%s\", \"tags\": {\"sensor\": \"bme_280\"}, \"fields\": {\"temp_c\": %.2f, \"humidity\": %.2f}, \"time\": %d}", mString, *measurement, t, h, time.Now().UnixNano())
+						mString = fmt.Sprintf("%s\n{\"measurement\": \"%s\", \"tags\": {\"sensor\": \"bme_280\"}, \"fields\": {\"temp_c\": %.2f, \"humidity\": %.2f}, \"time\": %d}", mString, *measurement, temp, hum, time.Now().UnixNano())
 					}
 				} else {
 					if mString == "" {
-						mString = fmt.Sprintf("%s,sensor=bme_280 temp_c=%.2f,humidity=%.2f %d", *measurement, t, h, time.Now().UnixNano())
+						mString = fmt.Sprintf("%s,sensor=bme_280 temp_c=%.2f,humidity=%.2f %d", *measurement, temp, hum, time.Now().UnixNano())
 					} else {
-						mString = fmt.Sprintf("%s\n%s,sensor=bme_280 temp_c=%.2f,humidity=%.2f %d", mString, *measurement, t, h, time.Now().UnixNano())
+						mString = fmt.Sprintf("%s\n%s,sensor=bme_280 temp_c=%.2f,humidity=%.2f %d", mString, *measurement, temp, hum, time.Now().UnixNano())
 					}
 				}
-				log.Printf("[main] Humidity: %.2f Temperature: %.2f", h, t)
+				log.Printf("[main] Humidity: %.2f Temperature: %.2f", hum, temp)
+				time.Sleep(1000 * time.Millisecond)
+				count++
 			} else {
-				log.Printf("[main] Temperature Reading Error")
+				rets := bme.BME280ReadValues()
+				temp = float64(float64(rets.Temperature) / 100.00)
+				hum = float64(rets.Humidity) / 1024.00
+				if rets.Humidity != -1 && rets.Temperature > -100 {
+					if *format == "json" {
+						if mString == "" {
+							mString = fmt.Sprintf("{\"measurement\": \"%s\", \"tags\": {\"sensor\": \"bme_280\"}, \"fields\": {\"temp_c\": %.2f, \"humidity\": %.2f}, \"time\": %d}", *measurement, temp, hum, time.Now().UnixNano())
+						} else {
+							mString = fmt.Sprintf("%s\n{\"measurement\": \"%s\", \"tags\": {\"sensor\": \"bme_280\"}, \"fields\": {\"temp_c\": %.2f, \"humidity\": %.2f}, \"time\": %d}", mString, *measurement, temp, hum, time.Now().UnixNano())
+						}
+					} else {
+						if mString == "" {
+							mString = fmt.Sprintf("%s,sensor=bme_280 temp_c=%.2f,humidity=%.2f %d", *measurement, temp, hum, time.Now().UnixNano())
+						} else {
+							mString = fmt.Sprintf("%s\n%s,sensor=bme_280 temp_c=%.2f,humidity=%.2f %d", mString, *measurement, temp, hum, time.Now().UnixNano())
+						}
+					}
+					log.Printf("[main] Humidity: %.2f Temperature: %.2f", hum, temp)
+				} else {
+					log.Printf("[main] Temperature Reading Error")
+				}
+				time.Sleep(1000 * time.Millisecond)
+				count++
 			}
-			time.Sleep(1500 * time.Millisecond)
-			count++
 		}
-		co2Value := k30.K30ReadValue()
-		if co2Value > 0 {
+		if virt { // invent co2 values
+			s1 := rand.NewSource(time.Now().UnixNano())
+			r1 := rand.New(s1)
+			co2Value = r1.Intn(10000)
 			if *format == "json" {
 				if mString == "" {
 					mString = fmt.Sprintf("{\"measurement\": \"%s\", \"tags\": {\"sensor\": \"k_30\"}, \"fields\": {\"ppm\": %d}, \"time\": %d}", *measurement, co2Value, time.Now().UnixNano())
@@ -177,15 +214,34 @@ func main() {
 				}
 			} else {
 				if mString == "" {
-					mString = fmt.Sprintf("%s,sensor=k_30 ppm=%.2f %d", *measurement, co2Value, time.Now().UnixNano())
+					mString = fmt.Sprintf("%s,sensor=k_30 ppm=%d %d", *measurement, co2Value, time.Now().UnixNano())
 				} else {
-					mString = fmt.Sprintf("%s\n%s,sensor=k_30 ppm=%.2f %d", mString, *measurement, co2Value, time.Now().UnixNano())
+					mString = fmt.Sprintf("%s\n%s,sensor=k_30 ppm=%d %d", mString, *measurement, co2Value, time.Now().UnixNano())
 				}
 			}
 
 			log.Printf("[main] CO2: %d ", co2Value)
 		} else {
-			log.Println("[main] CO2 Reading Error")
+			co2Value = k30.K30ReadValue()
+			if co2Value > 0 {
+				if *format == "json" {
+					if mString == "" {
+						mString = fmt.Sprintf("{\"measurement\": \"%s\", \"tags\": {\"sensor\": \"k_30\"}, \"fields\": {\"ppm\": %d}, \"time\": %d}", *measurement, co2Value, time.Now().UnixNano())
+					} else {
+						mString = fmt.Sprintf("%s\n{\"measurement\": \"%s\", \"tags\": {\"sensor\": \"k_30\"}, \"fields\": {\"ppm\": %d}, \"time\": %d}", mString, *measurement, co2Value, time.Now().UnixNano())
+					}
+				} else {
+					if mString == "" {
+						mString = fmt.Sprintf("%s,sensor=k_30 ppm=%d %d", *measurement, co2Value, time.Now().UnixNano())
+					} else {
+						mString = fmt.Sprintf("%s\n%s,sensor=k_30 ppm=%d %d", mString, *measurement, co2Value, time.Now().UnixNano())
+					}
+				}
+
+				log.Printf("[main] CO2: %d ", co2Value)
+			} else {
+				log.Println("[main] CO2 Reading Error")
+			}
 		}
 		token := client.Publish(
 			topic.telemetry,
